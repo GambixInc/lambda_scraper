@@ -21,42 +21,17 @@ A simple, serverless web scraping tool built with Python that runs on AWS Lambda
 - Python 3.9+ installed
 - AWS account with appropriate permissions
 
-### 2. Setup AWS Configuration
+### 2. Configure AWS
 
-Run the setup script to check your AWS configuration:
-
-```bash
-./setup.sh
-```
-
-This will:
-- Check if AWS CLI is installed
-- Verify AWS credentials are configured
-- Test required permissions
-- Create a `.env.example` file
-
-### 3. Configure Environment Variables (Optional)
-
-Copy the example environment file and customize if needed:
+Make sure your AWS CLI is configured:
 
 ```bash
-cp .env.example .env
+aws configure
+# or for a specific profile
+aws configure --profile your-profile
 ```
 
-Available environment variables:
-```bash
-# AWS Configuration
-AWS_REGION=us-east-1
-AWS_ACCOUNT_ID=123456789012
-
-# Optional: Override function name
-FUNCTION_NAME=lambda-scraper-python
-
-# Optional: Override ECR repository name
-ECR_REPO_NAME=lambda-scraper
-```
-
-### 4. Deploy to AWS Lambda
+### 3. Deploy to AWS Lambda
 
 ```bash
 ./deploy_python.sh --profile your-profile
@@ -115,19 +90,6 @@ curl -X POST https://your-function-url.lambda-url.us-east-1.on.aws/ \
 - **Timeout**: 5 minutes (300 seconds)
 - **Runtime**: Python 3.9
 
-### Environment Variables
-
-The deployment script supports these environment variables:
-
-```bash
-# Required for deployment
-AWS_REGION=us-east-1                    # AWS region (default: us-east-1)
-AWS_ACCOUNT_ID=123456789012             # AWS account ID (auto-detected if not set)
-
-# Optional overrides
-FUNCTION_NAME=lambda-scraper-python      # Lambda function name
-```
-
 ### AWS Permissions Required
 
 Your AWS user/role needs these permissions:
@@ -171,8 +133,6 @@ lambda_scraper/
 ├── lambda_function.py                   # Main Lambda function
 ├── requirements.txt                     # Python dependencies
 ├── deploy_python.sh                     # Deployment script
-├── setup.sh                            # AWS setup script
-├── .env.example                        # Environment variables template
 ├── .gitignore                          # Git ignore file
 └── README.md                           # This file
 ```

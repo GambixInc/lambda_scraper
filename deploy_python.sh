@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Python Lambda Scraper Deployment Script
-# This script deploys a simple Python Lambda function (no Docker needed)
+# This script deploys a simple Python Lambda function
 
 set -e
 
