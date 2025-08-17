@@ -149,10 +149,17 @@ dmypy.json
 ehthumbs.db
 Thumbs.db
 
-# Docker
-.dockerignore
+# AWS Lambda specific
+.aws/
+*.zip
+deployment-package/
+samconfig.toml
+template.yaml
+serverless.yml
 
 # Project specific
 output.json
 scraped_*.json
 logs/
+temp/
+tmp/

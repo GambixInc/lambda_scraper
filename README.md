@@ -1,65 +1,96 @@
 # Lambda Scraper
 
-A simple, dockerized web scraping tool built with Scrapy that can scrape any website with a basic URL input.
+A simple, serverless web scraping tool built with Python that runs on AWS Lambda. Can scrape any website with a simple API call.
 
 ## Features
 
-- Basic web scraping functionality
-- Extracts page title, content, and links
-- Dockerized for easy deployment
-- Simple command-line interface
-- Respects robots.txt rules
-- Built-in request throttling
+- **Serverless**: Runs on AWS Lambda - no server management
+- **Simple**: Single Python file with all dependencies
+- **API Ready**: HTTP endpoints for easy integration
+- **Auto-scaling**: Handles concurrent requests automatically
+- **Cost-effective**: Pay per request
+- **CORS Support**: Ready for web frontend integration
+- **Error Handling**: Proper HTTP status codes and error messages
+- **Fallback Support**: Uses requests/BeautifulSoup if Scrapy fails
 
 ## Quick Start
 
-### 1. Build the Docker Image
+### 1. Prerequisites
+
+- AWS CLI installed and configured
+- Python 3.9+ installed
+- AWS account with appropriate permissions
+
+### 2. Setup AWS Configuration
+
+Run the setup script to check your AWS configuration:
 
 ```bash
-docker build -t lambda_scraper .
+./setup.sh
 ```
 
-### 2. Run the Scraper
+This will:
+- Check if AWS CLI is installed
+- Verify AWS credentials are configured
+- Test required permissions
+- Create a `.env.example` file
+
+### 3. Configure Environment Variables (Optional)
+
+Copy the example environment file and customize if needed:
 
 ```bash
-docker run --rm lambda_scraper https://example.com
+cp .env.example .env
 ```
 
-The JSON output will be returned directly to your terminal.
+Available environment variables:
+```bash
+# AWS Configuration
+AWS_REGION=us-east-1
+AWS_ACCOUNT_ID=123456789012
 
-### 3. Save Output to File (Optional)
+# Optional: Override function name
+FUNCTION_NAME=lambda-scraper-python
 
-If you want to save the output to a file:
+# Optional: Override ECR repository name
+ECR_REPO_NAME=lambda-scraper
+```
+
+### 4. Deploy to AWS Lambda
 
 ```bash
-docker run --rm lambda_scraper https://example.com > output.json
+./deploy_python.sh --profile your-profile
 ```
 
-## Usage Examples
+This script will:
+- Create deployment package with all dependencies
+- Create/update Lambda function
+- Enable Function URL with CORS
+- Provide usage examples
 
-### Basic scraping:
+## API Usage
+
+### Function URL (Direct HTTPS endpoint)
+
+#### GET with Query Parameter:
 ```bash
-docker run --rm lambda_scraper https://httpbin.org/html
+curl "https://your-function-url.lambda-url.us-east-1.on.aws/?url=https://httpbin.org/html"
 ```
 
-### Scrape a news website:
+#### POST with JSON Body:
 ```bash
-docker run --rm lambda_scraper https://news.ycombinator.com
+curl -X POST https://your-function-url.lambda-url.us-east-1.on.aws/ \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://httpbin.org/html"}'
 ```
 
-### Scrape and save output:
-```bash
-docker run --rm lambda_scraper https://example.com > scraped_data.json
-```
+## Response Format
 
-## Output Format
-
-The scraper outputs data in JSON format with the following structure:
-
+### Success Response (200):
 ```json
 [
   {
-    "url": "https://example.com",
+    "url": "https://httpbin.org/html",
     "title": "Page Title",
     "content": "Extracted text content...",
     "links": ["https://link1.com", "https://link2.com"]
@@ -67,51 +98,127 @@ The scraper outputs data in JSON format with the following structure:
 ]
 ```
 
-## Project Structure
-
-```
-lambda_scraper/
-├── Dockerfile
-├── requirements.txt
-├── scrapy.cfg
-├── run_scraper.sh
-├── lambda_scraper/
-│   ├── __init__.py
-│   ├── settings.py
-│   ├── items.py
-│   └── spiders/
-│       ├── __init__.py
-│       └── basic_spider.py
-└── README.md
+### Error Response (400/500):
+```json
+{
+  "error": "Missing URL parameter",
+  "usage": "Provide url as query parameter (?url=https://example.com) or in request body"
+}
 ```
 
 ## Configuration
 
-The scraper is configured with conservative settings:
-- Respects robots.txt
-- 1-second delay between requests
-- Auto-throttling enabled
-- Random delay variation
+### Lambda Settings
 
-You can modify these settings in `lambda_scraper/settings.py` if needed.
+**Recommended Configuration:**
+- **Memory**: 512 MB (minimum), 1024 MB (recommended)
+- **Timeout**: 5 minutes (300 seconds)
+- **Runtime**: Python 3.9
+
+### Environment Variables
+
+The deployment script supports these environment variables:
+
+```bash
+# Required for deployment
+AWS_REGION=us-east-1                    # AWS region (default: us-east-1)
+AWS_ACCOUNT_ID=123456789012             # AWS account ID (auto-detected if not set)
+
+# Optional overrides
+FUNCTION_NAME=lambda-scraper-python      # Lambda function name
+```
+
+### AWS Permissions Required
+
+Your AWS user/role needs these permissions:
+
+**Lambda:**
+- `lambda:CreateFunction`
+- `lambda:UpdateFunctionCode`
+- `lambda:CreateFunctionUrlConfig`
+- `lambda:GetFunctionUrlConfig`
+
+**IAM:**
+- `iam:CreateRole`
+- `iam:AttachRolePolicy`
+- `iam:GetRole`
+
+**CloudWatch Logs:**
+- `logs:CreateLogGroup`
+- `logs:CreateLogStream`
+- `logs:PutLogEvents`
+
+## Local Development
+
+### Test Locally
+
+```bash
+# Install dependencies
+pip install -r requirements.txt
+
+# Test the function locally
+python -c "
+import lambda_function
+result = lambda_function.lambda_handler({'url': 'https://httpbin.org/html'}, {})
+print(result)
+"
+```
+
+## Project Structure
+
+```
+lambda_scraper/
+├── lambda_function.py                   # Main Lambda function
+├── requirements.txt                     # Python dependencies
+├── deploy_python.sh                     # Deployment script
+├── setup.sh                            # AWS setup script
+├── .env.example                        # Environment variables template
+├── .gitignore                          # Git ignore file
+└── README.md                           # This file
+```
+
+## Dependencies
+
+- **scrapy==2.11.0** - Main web scraping engine
+- **requests==2.31.0** - HTTP client (fallback)
+- **beautifulsoup4==4.12.2** - HTML parsing (fallback)
+- **lxml==4.9.3** - XML/HTML parser
 
 ## Limitations
 
-- This is a basic scraper designed for simple use cases
-- Does not handle JavaScript-rendered content
-- Does not follow pagination or complex crawling patterns
-- Designed for single-page scraping
+- **Lambda Timeout**: Maximum 15 minutes execution time
+- **Memory**: Limited to 10GB RAM
+- **Concurrent Executions**: Default limit of 1000 (can be increased)
+- **JavaScript**: Does not handle JavaScript-rendered content
+- **Complex Crawling**: Designed for single-page scraping
 
-## Development
+## Troubleshooting
 
-To run the scraper locally without Docker:
+### Common Issues
 
-1. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
+1. **AWS CLI Not Installed**: Install AWS CLI first
+2. **Credentials Not Configured**: Run `aws configure` or set environment variables
+3. **Permission Errors**: Ensure your AWS user has the required permissions
+4. **Timeout Errors**: Increase Lambda timeout or optimize scraping
+5. **Memory Errors**: Increase Lambda memory allocation
+6. **CORS Errors**: Check CORS configuration in Function URL
 
-2. Run the spider:
-   ```bash
-   scrapy crawl basic -a url="https://example.com" -o - -t json
-   ```
+### Logs
+
+View Lambda execution logs in CloudWatch:
+```bash
+aws logs tail /aws/lambda/lambda-scraper-python --follow
+```
+
+## Cost Optimization
+
+- **Memory**: Start with 512MB, increase if needed
+- **Timeout**: Set appropriate timeout (5 minutes is usually sufficient)
+- **Concurrency**: Monitor and adjust based on usage patterns
+
+## Security Considerations
+
+- **Input Validation**: URL validation is basic - consider adding more validation
+- **Rate Limiting**: Consider adding API Gateway rate limiting
+- **CORS**: Configure CORS properly for production use
+- **VPC**: Consider running in VPC for additional security if needed
