@@ -1,146 +1,130 @@
 import json
-import subprocess
-import tempfile
-import os
-import sys
-import scrapy
-from scrapy.crawler import CrawlerProcess
-from scrapy.utils.project import get_project_settings
-from io import StringIO
-from contextlib import redirect_stdout, redirect_stderr
+import logging
+from urllib.parse import urlparse
+import requests
+from bs4 import BeautifulSoup
 
+# Configure logging
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
 
-def lambda_handler(event, context):
-    """
-    AWS Lambda handler for web scraping
-    Expects event with 'url' parameter
-    """
+def scrape_url(url):
+    """Scrape a URL using requests and BeautifulSoup"""
     try:
-        # Extract URL from event (supports both query params and body)
-        url = None
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (compatible; Lambda-Scraper/1.0)'
+        }
         
-        # Try query string parameters first
-        if 'queryStringParameters' in event and event['queryStringParameters']:
-            url = event['queryStringParameters'].get('url')
+        response = requests.get(url, headers=headers, timeout=30)
+        response.raise_for_status()
         
-        # Try body if no query params
-        if not url and 'body' in event:
-            try:
-                body = json.loads(event['body']) if isinstance(event['body'], str) else event['body']
-                url = body.get('url')
-            except (json.JSONDecodeError, TypeError):
-                pass
+        soup = BeautifulSoup(response.content, 'html.parser')
         
-        # Try direct event (for testing)
-        if not url:
-            url = event.get('url')
+        # Extract title
+        title_tag = soup.find('title')
+        title = title_tag.get_text().strip() if title_tag else 'No title found'
         
-        if not url:
-            return {
-                'statusCode': 400,
-                'headers': {
-                    'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
-                    'Access-Control-Allow-Headers': 'Content-Type',
-                    'Access-Control-Allow-Methods': 'GET,POST,OPTIONS'
-                },
-                'body': json.dumps({
-                    'error': 'Missing URL parameter',
-                    'usage': 'Provide url as query parameter (?url=https://example.com) or in request body'
-                })
-            }
+        # Extract text content
+        text_content = soup.get_text()
+        text_content = ' '.join(text_content.split())  # Clean up whitespace
         
-        # Run the scraper using Scrapy directly
-        scraped_data = run_scrapy_spider(url)
+        # Extract links
+        links = []
+        for link in soup.find_all('a', href=True):
+            href = link['href']
+            if href.startswith(('http://', 'https://')):
+                links.append(href)
         
         return {
-            'statusCode': 200,
+            'url': url,
+            'title': title,
+            'content': text_content[:1000] + '...' if len(text_content) > 1000 else text_content,
+            'links': links[:10]
+        }
+        
+    except Exception as e:
+        logger.error(f"Scraping failed: {str(e)}")
+        return None
+
+def lambda_handler(event, context):
+    """AWS Lambda handler function"""
+    
+    # Parse URL from event
+    url = None
+    
+    # Check for URL in query parameters (GET request)
+    if 'queryStringParameters' in event and event['queryStringParameters']:
+        url = event['queryStringParameters'].get('url')
+    
+    # Check for URL in request body (POST request)
+    if not url and 'body' in event and event['body']:
+        try:
+            body = json.loads(event['body'])
+            url = body.get('url')
+        except (json.JSONDecodeError, KeyError):
+            pass
+    
+    # Validate URL
+    if not url:
+        return {
+            'statusCode': 400,
             'headers': {
                 'Content-Type': 'application/json',
                 'Access-Control-Allow-Origin': '*',
                 'Access-Control-Allow-Headers': 'Content-Type',
-                'Access-Control-Allow-Methods': 'GET,POST,OPTIONS'
+                'Access-Control-Allow-Methods': 'GET, POST, OPTIONS'
             },
-            'body': json.dumps(scraped_data)
+            'body': json.dumps({
+                'error': 'Missing URL parameter',
+                'usage': 'Provide url as query parameter (?url=https://example.com) or in request body'
+            })
         }
     
-    except Exception as e:
+    # Validate URL format
+    try:
+        parsed_url = urlparse(url)
+        if not parsed_url.scheme or not parsed_url.netloc:
+            raise ValueError("Invalid URL format")
+    except Exception:
+        return {
+            'statusCode': 400,
+            'headers': {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Headers': 'Content-Type',
+                'Access-Control-Allow-Methods': 'GET, POST, OPTIONS'
+            },
+            'body': json.dumps({
+                'error': 'Invalid URL format',
+                'usage': 'Provide a valid URL starting with http:// or https://'
+            })
+        }
+    
+    # Scrape the URL
+    result = scrape_url(url)
+    
+    if result is None:
         return {
             'statusCode': 500,
-            'headers': {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'},
-            'body': json.dumps({'error': f'Internal server error: {str(e)}'})
+            'headers': {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Headers': 'Content-Type',
+                'Access-Control-Allow-Methods': 'GET, POST, OPTIONS'
+            },
+            'body': json.dumps({
+                'error': 'Failed to scrape the URL',
+                'url': url
+            })
         }
-
-
-def run_scrapy_spider(url):
-    """Run Scrapy spider and return scraped data"""
-    # Capture stdout/stderr to avoid logging issues
-    output = StringIO()
-    error_output = StringIO()
     
-    try:
-        with redirect_stdout(output), redirect_stderr(error_output):
-            # Create a simple spider class inline
-            class SimpleSpider(scrapy.Spider):
-                name = 'simple'
-                start_urls = [url]
-                
-                def parse(self, response):
-                    item = {
-                        'url': response.url,
-                        'title': response.css('title::text').get(),
-                        'content': ' '.join(response.css('*::text').getall()).strip(),
-                        'links': response.css('a::attr(href)').getall()
-                    }
-                    return item
-            
-            # Create settings
-            settings = get_project_settings()
-            settings.set('ROBOTSTXT_OBEY', True)
-            settings.set('DOWNLOAD_DELAY', 1)
-            settings.set('AUTOTHROTTLE_ENABLED', True)
-            settings.set('AUTOTHROTTLE_START_DELAY', 1)
-            settings.set('AUTOTHROTTLE_MAX_DELAY', 60)
-            settings.set('AUTOTHROTTLE_TARGET_CONCURRENCY', 1.0)
-            settings.set('REQUEST_FINGERPRINTER_IMPLEMENTATION', '2.7')
-            settings.set('TWISTED_REACTOR', 'twisted.internet.asyncioreactor.AsyncioSelectorReactor')
-            
-            # Create crawler process
-            process = CrawlerProcess(settings)
-            process.crawl(SimpleSpider)
-            
-            # Collect results
-            results = []
-            def collect_item(item, response, spider):
-                results.append(item)
-            
-            # Add item pipeline to collect results
-            process.settings.set('ITEM_PIPELINES', {'__main__': collect_item})
-            
-            # Start the crawler
-            process.start()
-            
-            return results if results else [{'url': url, 'title': None, 'content': 'No content found', 'links': []}]
-            
-    except Exception as e:
-        # Fallback to simple requests if Scrapy fails
-        try:
-            import requests
-            from bs4 import BeautifulSoup
-            
-            response = requests.get(url, timeout=30)
-            soup = BeautifulSoup(response.text, 'html.parser')
-            
-            return [{
-                'url': url,
-                'title': soup.title.string if soup.title else None,
-                'content': soup.get_text().strip(),
-                'links': [a.get('href') for a in soup.find_all('a', href=True)]
-            }]
-        except Exception as fallback_error:
-            return [{
-                'url': url,
-                'title': None,
-                'content': f'Error scraping: {str(e)}',
-                'links': []
-            }]
+    return {
+        'statusCode': 200,
+        'headers': {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Headers': 'Content-Type',
+            'Access-Control-Allow-Methods': 'GET, POST, OPTIONS'
+        },
+        'body': json.dumps([result], indent=2)
+    }
