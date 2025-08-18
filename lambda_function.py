@@ -87,6 +87,43 @@ def scrape_url(url, max_retries=3):
             if 'text/html' not in content_type and 'application/xhtml' not in content_type:
                 logger.warning(f"Non-HTML content type: {content_type}")
             
+            # ===== BASIC CURL-LIKE INFORMATION =====
+            curl_info = {
+                'status_code': response.status_code,
+                'content_type': content_type,
+                'content_length': len(response.content),
+                'encoding': response.encoding,
+                'url_final': response.url,  # After redirects
+                'redirected': response.history != [],
+                'redirect_count': len(response.history),
+                'redirect_chain': [r.url for r in response.history],
+                'response_time_ms': response.elapsed.total_seconds() * 1000,
+                'server': response.headers.get('server', ''),
+                'date': response.headers.get('date', ''),
+                'last_modified': response.headers.get('last-modified', ''),
+                'etag': response.headers.get('etag', ''),
+                'cache_control': response.headers.get('cache-control', ''),
+                'expires': response.headers.get('expires', ''),
+                'content_encoding': response.headers.get('content-encoding', ''),
+                'transfer_encoding': response.headers.get('transfer-encoding', ''),
+                'connection': response.headers.get('connection', ''),
+                'keep_alive': response.headers.get('keep-alive', ''),
+                'all_headers': dict(response.headers),
+                'cookies': dict(response.cookies),
+                'is_compressed': response.headers.get('content-encoding') in ['gzip', 'deflate', 'br'],
+                'is_chunked': response.headers.get('transfer-encoding') == 'chunked',
+                'has_cache_headers': any(h in response.headers for h in ['cache-control', 'expires', 'last-modified']),
+                'security_headers': {
+                    'x_frame_options': response.headers.get('x-frame-options', ''),
+                    'x_content_type_options': response.headers.get('x-content-type-options', ''),
+                    'x_xss_protection': response.headers.get('x-xss-protection', ''),
+                    'strict_transport_security': response.headers.get('strict-transport-security', ''),
+                    'content_security_policy': response.headers.get('content-security-policy', ''),
+                    'referrer_policy': response.headers.get('referrer-policy', ''),
+                }
+            }
+            
+            # ===== DETAILED SCRAPING ANALYSIS =====
             soup = BeautifulSoup(response.content, 'html.parser')
             
             # Extract title
@@ -131,6 +168,90 @@ def scrape_url(url, max_retries=3):
             meta_keywords = soup.find('meta', attrs={'name': 'keywords'})
             keywords = meta_keywords.get('content', '') if meta_keywords else ''
             
+            # Extract additional meta tags
+            meta_tags = {}
+            for meta in soup.find_all('meta'):
+                name = meta.get('name') or meta.get('property')
+                content = meta.get('content')
+                if name and content:
+                    meta_tags[name] = content
+            
+            # Extract images
+            images = []
+            for img in soup.find_all('img'):
+                src = img.get('src', '')
+                alt = img.get('alt', '')
+                if src:
+                    if src.startswith('/'):
+                        parsed_url = urlparse(url)
+                        src = f"{parsed_url.scheme}://{parsed_url.netloc}{src}"
+                    images.append({'src': src, 'alt': alt})
+            
+            # Extract forms
+            forms = []
+            for form in soup.find_all('form'):
+                action = form.get('action', '')
+                method = form.get('method', 'get')
+                forms.append({'action': action, 'method': method})
+            
+            # Extract scripts
+            scripts = []
+            for script in soup.find_all('script'):
+                src = script.get('src', '')
+                if src:
+                    if src.startswith('/'):
+                        parsed_url = urlparse(url)
+                        src = f"{parsed_url.scheme}://{parsed_url.netloc}{src}"
+                    scripts.append(src)
+            
+            # Extract stylesheets
+            stylesheets = []
+            for link in soup.find_all('link', rel='stylesheet'):
+                href = link.get('href', '')
+                if href:
+                    if href.startswith('/'):
+                        parsed_url = urlparse(url)
+                        href = f"{parsed_url.scheme}://{parsed_url.netloc}{href}"
+                    stylesheets.append(href)
+            
+            # Analyze content structure
+            content_analysis = {
+                'headings': {
+                    'h1': len(soup.find_all('h1')),
+                    'h2': len(soup.find_all('h2')),
+                    'h3': len(soup.find_all('h3')),
+                    'h4': len(soup.find_all('h4')),
+                    'h5': len(soup.find_all('h5')),
+                    'h6': len(soup.find_all('h6')),
+                },
+                'paragraphs': len(soup.find_all('p')),
+                'lists': {
+                    'ul': len(soup.find_all('ul')),
+                    'ol': len(soup.find_all('ol')),
+                },
+                'tables': len(soup.find_all('table')),
+                'divs': len(soup.find_all('div')),
+                'spans': len(soup.find_all('span')),
+                'images_count': len(images),
+                'forms_count': len(forms),
+                'scripts_count': len(scripts),
+                'stylesheets_count': len(stylesheets),
+            }
+            
+            # Check for common frameworks/libraries
+            framework_detection = {
+                'jquery': 'jquery' in str(soup).lower(),
+                'react': 'react' in str(soup).lower() or 'jsx' in str(soup).lower(),
+                'vue': 'vue' in str(soup).lower(),
+                'angular': 'angular' in str(soup).lower(),
+                'bootstrap': 'bootstrap' in str(soup).lower(),
+                'wordpress': 'wp-' in str(soup).lower() or 'wordpress' in str(soup).lower(),
+                'drupal': 'drupal' in str(soup).lower(),
+                'joomla': 'joomla' in str(soup).lower(),
+                'shopify': 'shopify' in str(soup).lower(),
+                'woocommerce': 'woocommerce' in str(soup).lower(),
+            }
+            
             logger.info(f"Successfully scraped {url} on attempt {attempt + 1}")
             
             return {
@@ -143,7 +264,31 @@ def scrape_url(url, max_retries=3):
                 'content_length': len(text_content),
                 'links_count': len(unique_links),
                 'status_code': response.status_code,
-                'content_type': content_type
+                'content_type': content_type,
+                'scraped_at': time.time(),
+                'scraper_version': '2.0',
+                'scraper_features': [
+                    'anti-bot-protection',
+                    'realistic-headers',
+                    'retry-logic',
+                    'rate-limiting-handling'
+                ],
+                # ===== NEW: CURL-LIKE INFORMATION =====
+                'curl_info': curl_info,
+                # ===== NEW: ENHANCED SCRAPING DATA =====
+                'meta_tags': meta_tags,
+                'images': images[:10],  # Limit to first 10 images
+                'forms': forms,
+                'scripts': scripts[:10],  # Limit to first 10 scripts
+                'stylesheets': stylesheets[:10],  # Limit to first 10 stylesheets
+                'content_analysis': content_analysis,
+                'framework_detection': framework_detection,
+                'word_count': len(text_content.split()),
+                'character_count': len(text_content),
+                'has_ssl': url.startswith('https://'),
+                'domain': urlparse(url).netloc,
+                'path': urlparse(url).path,
+                'query_params': dict(urlparse(url).query.split('&')) if urlparse(url).query else {},
             }
             
         except requests.exceptions.Timeout:
