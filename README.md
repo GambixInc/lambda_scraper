@@ -1,17 +1,42 @@
 # Lambda Scraper
 
-A simple, serverless web scraping tool built with Python that runs on AWS Lambda. Can scrape any website with a simple API call.
+A sophisticated, serverless web scraping tool built with Python that runs on AWS Lambda. Features advanced anti-bot protection and can scrape most websites with a simple API call.
 
 ## Features
 
 - **Serverless**: Runs on AWS Lambda - no server management
-- **Simple**: Single Python file with all dependencies
+- **Anti-Bot Protection**: Realistic browser headers, random delays, retry logic
+- **Rate Limiting Handling**: Automatic handling of 429 responses with exponential backoff
+- **Session Management**: Persistent connections for better performance
+- **Robust Error Handling**: Comprehensive error handling with detailed logging
 - **API Ready**: HTTP endpoints for easy integration
 - **Auto-scaling**: Handles concurrent requests automatically
 - **Cost-effective**: Pay per request
 - **CORS Support**: Ready for web frontend integration
-- **Error Handling**: Proper HTTP status codes and error messages
-- **Fallback Support**: Uses requests/BeautifulSoup if Scrapy fails
+- **Enhanced Content Extraction**: Better text cleaning, meta data extraction
+- **Configurable Retries**: Customizable retry attempts per request
+
+## Anti-Bot Protection Features
+
+### 🛡️ Realistic Browser Headers
+- Rotating User-Agent strings from real browsers
+- Complete set of modern browser headers (Accept, Accept-Language, etc.)
+- Security headers (Sec-Fetch-*, Sec-Ch-Ua) to appear more legitimate
+
+### ⏱️ Respectful Timing
+- Random delays (1-3 seconds) before each request
+- Longer delays for errors (2-7 seconds for timeouts, 3-7 for connection errors)
+- Extended delays for rate limiting (10-20 seconds)
+
+### 🔄 Smart Retry Logic
+- Configurable retry attempts (default: 3, max: 5)
+- Different delay strategies for different error types
+- Automatic handling of HTTP 429 (rate limit) responses
+
+### 🎯 Session Management
+- Persistent HTTP sessions for better connection handling
+- Proper connection pooling
+- Automatic redirect following
 
 ## Quick Start
 
@@ -52,6 +77,11 @@ This script will:
 curl "https://your-function-url.lambda-url.us-east-1.on.aws/?url=https://httpbin.org/html"
 ```
 
+#### GET with Custom Retries:
+```bash
+curl "https://your-function-url.lambda-url.us-east-1.on.aws/?url=https://httpbin.org/html&retries=5"
+```
+
 #### POST with JSON Body:
 ```bash
 curl -X POST https://your-function-url.lambda-url.us-east-1.on.aws/ \
@@ -67,8 +97,22 @@ curl -X POST https://your-function-url.lambda-url.us-east-1.on.aws/ \
   {
     "url": "https://httpbin.org/html",
     "title": "Page Title",
-    "content": "Extracted text content...",
-    "links": ["https://link1.com", "https://link2.com"]
+    "description": "Meta description if available",
+    "keywords": "Meta keywords if available",
+    "content": "Extracted and cleaned text content...",
+    "links": ["https://link1.com", "https://link2.com"],
+    "content_length": 1234,
+    "links_count": 15,
+    "status_code": 200,
+    "content_type": "text/html",
+    "scraped_at": 1703123456.789,
+    "scraper_version": "2.0",
+    "scraper_features": [
+      "anti-bot-protection",
+      "realistic-headers",
+      "retry-logic",
+      "rate-limiting-handling"
+    ]
   }
 ]
 ```
@@ -76,8 +120,14 @@ curl -X POST https://your-function-url.lambda-url.us-east-1.on.aws/ \
 ### Error Response (400/500):
 ```json
 {
-  "error": "Missing URL parameter",
-  "usage": "Provide url as query parameter (?url=https://example.com) or in request body"
+  "error": "Failed to scrape the URL",
+  "url": "https://example.com",
+  "message": "The scraper encountered an error or the website may be blocking automated access",
+  "suggestions": [
+    "Check if the URL is accessible in a browser",
+    "The site may have anti-bot protection",
+    "Try again later if the site is temporarily unavailable"
+  ]
 }
 ```
 
@@ -86,51 +136,50 @@ curl -X POST https://your-function-url.lambda-url.us-east-1.on.aws/ \
 ### Lambda Settings
 
 **Recommended Configuration:**
-- **Memory**: 512 MB (minimum), 1024 MB (recommended)
+- **Memory**: 1024 MB (recommended for better performance)
 - **Timeout**: 5 minutes (300 seconds)
 - **Runtime**: Python 3.9
 
-### AWS Permissions Required
+### Query Parameters
 
-Your AWS user/role needs these permissions:
+- **url** (required): The URL to scrape
+- **retries** (optional): Number of retry attempts (1-5, default: 3)
 
-**Lambda:**
-- `lambda:CreateFunction`
-- `lambda:UpdateFunctionCode`
-- `lambda:CreateFunctionUrlConfig`
-- `lambda:GetFunctionUrlConfig`
+## What This Scraper Can Handle
 
-**IAM:**
-- `iam:CreateRole`
-- `iam:AttachRolePolicy`
-- `iam:GetRole`
+### ✅ Basic Anti-Bot Protection
+- Header validation checks
+- Request frequency monitoring
+- Simple bot pattern detection
 
-**CloudWatch Logs:**
-- `logs:CreateLogGroup`
-- `logs:CreateLogStream`
-- `logs:PutLogEvents`
+### ✅ Rate Limiting
+- Automatic detection of 429 responses
+- Exponential backoff with random delays
+- Retry logic with increasing delays
 
-## Local Development
+### ✅ Connection Issues
+- Timeout handling with retries
+- Connection error recovery
+- Network instability handling
 
-### Test Locally
+## What This Scraper Cannot Handle
 
-```bash
-# Install dependencies
-pip install -r requirements.txt
+### ❌ Advanced Protection
+- JavaScript challenges requiring execution
+- CAPTCHA systems
+- Advanced browser fingerprinting
+- IP-based rate limiting (same IP address)
 
-# Test the function locally
-python -c "
-import lambda_function
-result = lambda_function.lambda_handler({'url': 'https://httpbin.org/html'}, {})
-print(result)
-"
-```
+### ❌ Dynamic Content
+- JavaScript-rendered content
+- Single Page Applications (SPAs)
+- Content loaded via AJAX
 
 ## Project Structure
 
 ```
 lambda_scraper/
-├── lambda_function.py                   # Main Lambda function
+├── lambda_function.py                   # Main Lambda function with anti-bot protection
 ├── requirements.txt                     # Python dependencies
 ├── deploy_python.sh                     # Deployment script
 ├── .gitignore                          # Git ignore file
@@ -139,10 +188,9 @@ lambda_scraper/
 
 ## Dependencies
 
-- **scrapy==2.11.0** - Main web scraping engine
-- **requests==2.31.0** - HTTP client (fallback)
-- **beautifulsoup4==4.12.2** - HTML parsing (fallback)
-- **lxml==4.9.3** - XML/HTML parser
+- **requests==2.31.0** - HTTP client with session management
+- **beautifulsoup4==4.12.2** - HTML parsing and content extraction
+- **lxml==4.9.3** - XML/HTML parser (included with BeautifulSoup)
 
 ## Limitations
 
@@ -151,6 +199,7 @@ lambda_scraper/
 - **Concurrent Executions**: Default limit of 1000 (can be increased)
 - **JavaScript**: Does not handle JavaScript-rendered content
 - **Complex Crawling**: Designed for single-page scraping
+- **IP Rotation**: Uses Lambda's IP address (no proxy rotation)
 
 ## Troubleshooting
 
@@ -162,6 +211,7 @@ lambda_scraper/
 4. **Timeout Errors**: Increase Lambda timeout or optimize scraping
 5. **Memory Errors**: Increase Lambda memory allocation
 6. **CORS Errors**: Check CORS configuration in Function URL
+7. **Blocked by Website**: Some sites may still block Lambda IPs
 
 ### Logs
 
@@ -172,13 +222,15 @@ aws logs tail /aws/lambda/lambda-scraper-python --follow
 
 ## Cost Optimization
 
-- **Memory**: Start with 512MB, increase if needed
+- **Memory**: Start with 1024MB for better performance
 - **Timeout**: Set appropriate timeout (5 minutes is usually sufficient)
 - **Concurrency**: Monitor and adjust based on usage patterns
+- **Retries**: Limit retry attempts to avoid excessive costs
 
 ## Security Considerations
 
-- **Input Validation**: URL validation is basic - consider adding more validation
-- **Rate Limiting**: Consider adding API Gateway rate limiting
+- **Input Validation**: Enhanced URL validation with scheme checking
+- **Rate Limiting**: Built-in rate limiting handling
 - **CORS**: Configure CORS properly for production use
 - **VPC**: Consider running in VPC for additional security if needed
+- **Headers**: Realistic headers help avoid detection but don't guarantee access
