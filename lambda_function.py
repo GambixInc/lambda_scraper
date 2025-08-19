@@ -5,6 +5,7 @@ import time
 from urllib.parse import urlparse
 import requests
 from bs4 import BeautifulSoup
+from dynamodb_helper import save_scrape_data, generate_project_id
 
 # Configure logging
 logger = logging.getLogger()
@@ -386,13 +387,35 @@ def lambda_handler(event, context):
     
     # Get additional parameters
     max_retries = 3
+    user_id = None
+    
     if 'queryStringParameters' in event and event['queryStringParameters']:
         try:
             retries_param = event['queryStringParameters'].get('retries')
             if retries_param:
                 max_retries = min(int(retries_param), 5)  # Cap at 5 retries
+            user_id = event['queryStringParameters'].get('user_id')
         except ValueError:
             pass
+    
+    # Check for user_id in request body (POST request)
+    if not user_id and 'body' in event and event['body']:
+        try:
+            body = json.loads(event['body'])
+            user_id = body.get('user_id')
+        except (json.JSONDecodeError, KeyError):
+            pass
+    
+    # Validate user_id (required for saving to DynamoDB)
+    if not user_id:
+        return create_response(400, {
+            'error': 'Missing user_id parameter',
+            'usage': 'Provide user_id as query parameter (?user_id=your_user_id) or in request body',
+            'example': {
+                'GET': '?url=https://example.com&user_id=your_user_id',
+                'POST': '{"url": "https://example.com", "user_id": "your_user_id"}'
+            }
+        })
     
     # Scrape the URL
     logger.info(f"Starting scrape of {url} with max_retries={max_retries}")
@@ -419,5 +442,24 @@ def lambda_handler(event, context):
         'retry-logic',
         'rate-limiting-handling'
     ]
+    
+    # Save scrape data to DynamoDB
+    try:
+        project_id = generate_project_id()
+        save_success = save_scrape_data(user_id, project_id, url, result)
+        
+        if save_success:
+            logger.info(f"✅ Successfully saved scrape data to DynamoDB for user {user_id}, project {project_id}")
+            result['project_id'] = project_id
+            result['saved_to_dynamodb'] = True
+        else:
+            logger.warning(f"⚠️ Failed to save scrape data to DynamoDB for user {user_id}")
+            result['saved_to_dynamodb'] = False
+            result['dynamodb_error'] = 'Failed to save data'
+            
+    except Exception as e:
+        logger.error(f"❌ Error saving to DynamoDB: {str(e)}")
+        result['saved_to_dynamodb'] = False
+        result['dynamodb_error'] = str(e)
     
     return create_response(200, [result])
