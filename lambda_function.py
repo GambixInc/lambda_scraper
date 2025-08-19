@@ -5,7 +5,7 @@ import time
 from urllib.parse import urlparse
 import requests
 from bs4 import BeautifulSoup
-from dynamodb_helper import save_scrape_data, generate_project_id
+from dynamodb_helper import save_scrape_data, generate_project_id, get_user_scrapes
 
 # Configure logging
 logger = logging.getLogger()
@@ -152,7 +152,7 @@ def scrape_url(url, max_retries=3):
                     href = f"{parsed_url.scheme}://{parsed_url.netloc}{href}"
                 elif href.startswith(('http://', 'https://')):
                     links.append(href)
-            
+        
             # Remove duplicates while preserving order
             seen = set()
             unique_links = []
@@ -300,7 +300,7 @@ def scrape_url(url, max_retries=3):
             else:
                 logger.error(f"All attempts timed out for {url}")
                 return None
-                
+
         except requests.exceptions.ConnectionError as e:
             logger.warning(f"Connection error on attempt {attempt + 1} for {url}: {str(e)}")
             if attempt < max_retries - 1:
@@ -332,38 +332,8 @@ def scrape_url(url, max_retries=3):
     
     return None
 
-def lambda_handler(event, context):
-    """AWS Lambda handler function with enhanced error handling and CORS support"""
-    
-    # Handle OPTIONS requests (CORS preflight)
-    if event.get('httpMethod') == 'OPTIONS':
-        return create_response(200, {'message': 'OK'})
-    
-    # Parse URL from event
-    url = None
-    
-    # Check for URL in query parameters (GET request)
-    if 'queryStringParameters' in event and event['queryStringParameters']:
-        url = event['queryStringParameters'].get('url')
-    
-    # Check for URL in request body (POST request)
-    if not url and 'body' in event and event['body']:
-        try:
-            body = json.loads(event['body'])
-            url = body.get('url')
-        except (json.JSONDecodeError, KeyError):
-            pass
-    
-    # Validate URL
-    if not url:
-        return create_response(400, {
-            'error': 'Missing URL parameter',
-            'usage': 'Provide url as query parameter (?url=https://example.com) or in request body',
-            'example': {
-                'GET': '?url=https://example.com',
-                'POST': '{"url": "https://example.com"}'
-            }
-        })
+def handle_new_scrape(url, user_id, event):
+    """Handle creating a new scrape (url + user_id provided)"""
     
     # Validate URL format
     try:
@@ -380,42 +350,21 @@ def lambda_handler(event, context):
             
     except Exception as e:
         return create_response(400, {
-            'error': 'Invalid URL format',
+                'error': 'Invalid URL format',
             'message': str(e),
-            'usage': 'Provide a valid URL starting with http:// or https://'
-        })
+                'usage': 'Provide a valid URL starting with http:// or https://'
+            })
     
     # Get additional parameters
     max_retries = 3
-    user_id = None
     
     if 'queryStringParameters' in event and event['queryStringParameters']:
         try:
             retries_param = event['queryStringParameters'].get('retries')
             if retries_param:
                 max_retries = min(int(retries_param), 5)  # Cap at 5 retries
-            user_id = event['queryStringParameters'].get('user_id')
         except ValueError:
             pass
-    
-    # Check for user_id in request body (POST request)
-    if not user_id and 'body' in event and event['body']:
-        try:
-            body = json.loads(event['body'])
-            user_id = body.get('user_id')
-        except (json.JSONDecodeError, KeyError):
-            pass
-    
-    # Validate user_id (required for saving to DynamoDB)
-    if not user_id:
-        return create_response(400, {
-            'error': 'Missing user_id parameter',
-            'usage': 'Provide user_id as query parameter (?user_id=your_user_id) or in request body',
-            'example': {
-                'GET': '?url=https://example.com&user_id=your_user_id',
-                'POST': '{"url": "https://example.com", "user_id": "your_user_id"}'
-            }
-        })
     
     # Scrape the URL
     logger.info(f"Starting scrape of {url} with max_retries={max_retries}")
@@ -423,7 +372,7 @@ def lambda_handler(event, context):
     
     if result is None:
         return create_response(500, {
-            'error': 'Failed to scrape the URL',
+                'error': 'Failed to scrape the URL',
             'url': url,
             'message': 'The scraper encountered an error or the website may be blocking automated access',
             'suggestions': [
@@ -463,3 +412,78 @@ def lambda_handler(event, context):
         result['dynamodb_error'] = str(e)
     
     return create_response(200, [result])
+
+def handle_get_user_projects(user_id):
+    """Handle retrieving user projects (only user_id provided)"""
+    
+    try:
+        # Get user projects from DynamoDB
+        projects = get_user_scrapes(user_id, limit=50)
+        
+        return create_response(200, {
+            'mode': 'retrieve',
+            'user_id': user_id,
+            'projects': projects,
+            'count': len(projects)
+        })
+        
+    except Exception as e:
+        logger.error(f"❌ Error retrieving user projects: {str(e)}")
+        return create_response(500, {
+            'error': 'Failed to retrieve user projects',
+            'user_id': user_id,
+            'message': str(e)
+        })
+
+def lambda_handler(event, context):
+    """AWS Lambda handler function with enhanced error handling and CORS support"""
+    
+    # Handle OPTIONS requests (CORS preflight)
+    if event.get('httpMethod') == 'OPTIONS':
+        return create_response(200, {'message': 'OK'})
+    
+    # Parse URL and user_id from event
+    url = None
+    user_id = None
+    
+    # Check for parameters in query parameters (GET request)
+    if 'queryStringParameters' in event and event['queryStringParameters']:
+        url = event['queryStringParameters'].get('url')
+        user_id = event['queryStringParameters'].get('user_id')
+    
+    # Check for parameters in request body (POST request)
+    if 'body' in event and event['body']:
+        try:
+            # Handle different body formats
+            if isinstance(event['body'], str):
+                body = json.loads(event['body'])
+            elif isinstance(event['body'], dict):
+                body = event['body']
+            else:
+                body = {}
+                
+            if not url:
+                url = body.get('url')
+            if not user_id:
+                user_id = body.get('user_id')
+        except (json.JSONDecodeError, KeyError, AttributeError):
+            pass
+    
+    # Validate user_id (always required)
+    if not user_id:
+        return create_response(400, {
+            'error': 'Missing user_id parameter',
+            'usage': 'Provide user_id as query parameter (?user_id=your_user_id) or in request body',
+            'example': {
+                'GET': '?user_id=your_user_id',
+                'POST': '{"user_id": "your_user_id"}'
+            }
+        })
+    
+    # Simple dual-mode logic
+    if url:
+        # Mode 1: Create new scrape (url + user_id provided)
+        return handle_new_scrape(url, user_id, event)
+    else:
+        # Mode 2: Get user projects (only user_id provided)
+        return handle_get_user_projects(user_id)

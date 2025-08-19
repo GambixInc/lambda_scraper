@@ -16,21 +16,28 @@ No authentication required - the API uses `user_id` parameter for data organizat
 
 ## API Endpoints
 
-### Scrape Website
+### Dual-Mode API
 
 **Endpoint:** `POST /` or `GET /`
 
-Scrapes a website and returns comprehensive data including content analysis, framework detection, and HTTP response details.
+This API supports two modes of operation:
+
+1. **Create New Scrape** - When both `url` and `user_id` are provided
+2. **Get User Projects** - When only `user_id` is provided
+
+The API automatically detects which mode to use based on the parameters provided.
 
 #### Request Parameters
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `url` | string | ✅ | The website URL to scrape (must start with http:// or https://) |
 | `user_id` | string | ✅ | Unique identifier for the user (used for DynamoDB filtering) |
-| `retries` | number | ❌ | Number of retry attempts (1-5, default: 3) |
+| `url` | string | ❌ | The website URL to scrape (required for new scrapes, omit for getting projects) |
+| `retries` | number | ❌ | Number of retry attempts (1-5, default: 3, only for new scrapes) |
 
 #### Request Examples
+
+**Mode 1: Create New Scrape**
 
 **GET Request:**
 ```
@@ -46,7 +53,23 @@ GET /?url=https://example.com&user_id=user123&retries=3
 }
 ```
 
+**Mode 2: Get User Projects**
+
+**GET Request:**
+```
+GET /?user_id=user123
+```
+
+**POST Request:**
+```json
+{
+  "user_id": "user123"
+}
+```
+
 #### Response Format
+
+**Mode 1: Create New Scrape Response**
 
 The API returns an array with one object containing the scrape results:
 
@@ -161,9 +184,68 @@ The API returns an array with one object containing the scrape results:
     "query_params": {}
   }
 ]
+
+**Mode 2: Get User Projects Response**
+
+The API returns an object containing the user's projects:
+
+```json
+{
+  "mode": "retrieve",
+  "user_id": "user123",
+  "projects": [
+    {
+      "user_id": "user123",
+      "project_id": "proj_1755608050_30e172ad",
+      "url": "https://example.com",
+      "scraped_at": 1755608050,
+      "status": "success",
+      "scrape_data": {
+        "url": "https://example.com",
+        "title": "Example Domain",
+        "content": "This domain is for use in illustrative examples...",
+        "word_count": 1250,
+        "character_count": 8750,
+        "curl_info": {
+          "status_code": 200,
+          "response_time_ms": 245.67
+        },
+        "framework_detection": {
+          "bootstrap": true,
+          "wordpress": false
+        }
+      }
+    },
+    {
+      "user_id": "user123",
+      "project_id": "proj_1755608000_abc12345",
+      "url": "https://another-example.com",
+      "scraped_at": 1755608000,
+      "status": "success",
+      "scrape_data": {
+        "url": "https://another-example.com",
+        "title": "Another Example",
+        "content": "Another example website content...",
+        "word_count": 800,
+        "character_count": 5600,
+        "curl_info": {
+          "status_code": 200,
+          "response_time_ms": 189.23
+        },
+        "framework_detection": {
+          "bootstrap": false,
+          "wordpress": true
+        }
+      }
+    }
+  ],
+  "count": 2
+}
 ```
 
 #### Response Fields Explained
+
+**Mode 1: Create New Scrape Fields**
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -175,6 +257,15 @@ The API returns an array with one object containing the scrape results:
 | `scraped_at` | number | Unix timestamp when scraping occurred |
 | `scraper_version` | string | Version of the scraper |
 | `scraper_features` | array | List of enabled features |
+
+**Mode 2: Get User Projects Fields**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `mode` | string | Always "retrieve" for this mode |
+| `user_id` | string | The user ID that was requested |
+| `projects` | array | Array of user's scrape projects |
+| `count` | number | Total number of projects returned |
 
 **CURL Information (`curl_info`):**
 - `status_code`: HTTP response status
@@ -245,167 +336,36 @@ The API returns an array with one object containing the scrape results:
 }
 ```
 
-## Frontend Integration Examples
+## How to Use
 
-### JavaScript/TypeScript
-
-**Using Fetch API:**
+### 1. Create New Scrape
 ```javascript
-async function scrapeWebsite(url, userId, retries = 3) {
-  try {
-    const response = await fetch('https://your-lambda-function-url.lambda-url.us-east-1.on.aws/', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        url: url,
-        user_id: userId,
-        retries: retries
-      })
-    });
-
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || 'Scraping failed');
-    }
-
-    const data = await response.json();
-    return data[0]; // API returns array with single object
-  } catch (error) {
-    console.error('Scraping error:', error);
-    throw error;
-  }
-}
-
-// Usage
-scrapeWebsite('https://example.com', 'user123')
-  .then(result => {
-    console.log('Scrape successful:', result);
-    console.log('Project ID:', result.project_id);
-    console.log('Word count:', result.word_count);
-    console.log('Framework detected:', result.framework_detection);
+fetch('https://your-lambda-function-url.lambda-url.us-east-1.on.aws/', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    url: 'https://example.com',
+    user_id: 'user123'
   })
-  .catch(error => {
-    console.error('Scrape failed:', error);
-  });
+})
+.then(response => response.json())
+.then(data => console.log(data[0]));
 ```
 
-**Using Axios:**
+### 2. Get User Projects
 ```javascript
-import axios from 'axios';
-
-async function scrapeWebsite(url, userId, retries = 3) {
-  try {
-    const response = await axios.post('https://your-lambda-function-url.lambda-url.us-east-1.on.aws/', {
-      url: url,
-      user_id: userId,
-      retries: retries
-    });
-
-    return response.data[0];
-  } catch (error) {
-    if (error.response) {
-      throw new Error(error.response.data.error || 'Scraping failed');
-    }
-    throw error;
-  }
-}
+fetch('https://your-lambda-function-url.lambda-url.us-east-1.on.aws/', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    user_id: 'user123'
+  })
+})
+.then(response => response.json())
+.then(data => console.log(data.projects));
 ```
 
-### React Hook Example
 
-```javascript
-import { useState, useCallback } from 'react';
-
-function useWebsiteScraper() {
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-  const [result, setResult] = useState(null);
-
-  const scrapeWebsite = useCallback(async (url, userId, retries = 3) => {
-    setLoading(true);
-    setError(null);
-    
-    try {
-      const response = await fetch('https://your-lambda-function-url.lambda-url.us-east-1.on.aws/', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          url: url,
-          user_id: userId,
-          retries: retries
-        })
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Scraping failed');
-      }
-
-      const data = await response.json();
-      setResult(data[0]);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  return { scrapeWebsite, loading, error, result };
-}
-
-// Usage in component
-function ScraperComponent() {
-  const { scrapeWebsite, loading, error, result } = useWebsiteScraper();
-  const [url, setUrl] = useState('');
-  const [userId, setUserId] = useState('');
-
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    scrapeWebsite(url, userId);
-  };
-
-  return (
-    <div>
-      <form onSubmit={handleSubmit}>
-        <input
-          type="url"
-          value={url}
-          onChange={(e) => setUrl(e.target.value)}
-          placeholder="Enter website URL"
-          required
-        />
-        <input
-          type="text"
-          value={userId}
-          onChange={(e) => setUserId(e.target.value)}
-          placeholder="Enter user ID"
-          required
-        />
-        <button type="submit" disabled={loading}>
-          {loading ? 'Scraping...' : 'Scrape Website'}
-        </button>
-      </form>
-
-      {error && <div className="error">Error: {error}</div>}
-      
-      {result && (
-        <div className="result">
-          <h3>Scrape Results</h3>
-          <p><strong>Title:</strong> {result.title}</p>
-          <p><strong>Project ID:</strong> {result.project_id}</p>
-          <p><strong>Word Count:</strong> {result.word_count}</p>
-          <p><strong>Saved to DB:</strong> {result.saved_to_dynamodb ? 'Yes' : 'No'}</p>
-          <p><strong>Response Time:</strong> {result.curl_info.response_time_ms}ms</p>
-        </div>
-      )}
-    </div>
-  );
-}
-```
 
 ## Data Persistence
 
@@ -427,30 +387,13 @@ The scraper includes several features to avoid detection:
 - **Session Management:** Maintains cookies and connection state
 - **Rate Limiting Handling:** Respects 429 status codes with delays
 
-## Best Practices
+## Quick Reference
 
-1. **User ID Management:** Use consistent, unique user IDs for proper data organization
-2. **Error Handling:** Always handle potential errors and check `saved_to_dynamodb` status
-3. **Rate Limiting:** Don't make too many requests in quick succession
-4. **URL Validation:** Ensure URLs are properly formatted before sending
-5. **Project ID Storage:** Store the returned `project_id` for future reference
+**To scrape a website:** Send `url` + `user_id`
+**To get user projects:** Send only `user_id`
 
-## Troubleshooting
+**user_id is always required.**
 
-**Common Issues:**
+## That's it!
 
-1. **"Missing user_id parameter"** - Ensure you're passing the `user_id` in your request
-2. **"Invalid URL format"** - Make sure URLs start with `http://` or `https://`
-3. **"Failed to scrape the URL"** - The website may have anti-bot protection or be temporarily unavailable
-4. **`saved_to_dynamodb: false`** - Check the `dynamodb_error` field for details
-
-**Debugging Tips:**
-
-- Check the `curl_info.status_code` to see if the request was successful
-- Look at `curl_info.response_time_ms` to identify slow responses
-- Examine `framework_detection` to understand the website's technology stack
-- Use the `retries` parameter to increase retry attempts for problematic sites
-
-## Support
-
-For issues or questions, check the error responses for detailed information about what went wrong. The API includes comprehensive error messages and usage examples.
+Copy the examples above and replace `your-lambda-function-url` with your actual URL.

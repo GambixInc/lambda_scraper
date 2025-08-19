@@ -113,6 +113,7 @@ pip install -r requirements.txt -t deployment-package/
 
 # Copy function code
 cp lambda_function.py deployment-package/
+cp dynamodb_helper.py deployment-package/
 
 # Create ZIP file
 cd deployment-package

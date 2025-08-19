@@ -86,6 +86,25 @@ def save_scrape_data(user_id, project_id, url, scrape_data):
         logger.error(f"❌ Unexpected error saving data: {str(e)}")
         return False
 
+def convert_decimals_to_serializable(obj):
+    """
+    Convert Decimal types to regular Python types for JSON serialization
+    
+    Args:
+        obj: Object that may contain Decimal types
+    
+    Returns:
+        Object with Decimal types converted to int/float
+    """
+    if isinstance(obj, Decimal):
+        return int(obj) if obj % 1 == 0 else float(obj)
+    elif isinstance(obj, dict):
+        return {key: convert_decimals_to_serializable(value) for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_decimals_to_serializable(item) for item in obj]
+    else:
+        return obj
+
 def get_user_scrapes(user_id, limit=50):
     """
     Get all scrapes for a specific user
@@ -110,6 +129,8 @@ def get_user_scrapes(user_id, limit=50):
         )
         
         items = response.get('Items', [])
+        # Convert Decimal types to serializable types
+        items = convert_decimals_to_serializable(items)
         logger.info(f"✅ Retrieved {len(items)} scrapes for user {user_id}")
         return items
         
